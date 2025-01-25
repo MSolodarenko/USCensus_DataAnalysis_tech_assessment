@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 # Step 0: Load and understand the data structure
 # load the datasets without header
@@ -70,4 +71,29 @@ correlation_matrix = train_data[numerical_features].corr()
 sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm')
 plt.title('Feature Correlations with income_class')
 # plt.show()
+
+# Step 2: Data Preparation
+# no missing values
+# but if there were missing values:
+# train_data.fillna(method='ffill', inplace=True)
+# test_data.fillna(method='ffill', inplace=True)
+
+# encode categorical variables
+categorical_columns = train_data.select_dtypes(include=['object']).columns
+encoder = LabelEncoder()
+
+for col in categorical_columns:
+    train_data[col] = encoder.fit_transform(train_data[col])
+    test_data[col] = encoder.fit_transform(test_data[col])
+
+# scale numerical features
+scaler = StandardScaler()
+train_data[numerical_features] = scaler.fit_transform(train_data[numerical_features])
+test_data[numerical_features] = scaler.fit_transform(test_data[numerical_features])
+
+# Split datasets into predictors (X) and target (y) subsets
+X_train = train_data.drop('income_class', axis=1)
+y_train = train_data['income_class']
+X_test = test_data.drop('income_class', axis=1)
+y_test = test_data['income_class']
 
