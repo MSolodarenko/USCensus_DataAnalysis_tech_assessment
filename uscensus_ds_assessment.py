@@ -3,6 +3,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.ensemble import RandomForestClassifier, VotingClassifier
+from xgboost import XGBClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, classification_report
+from imblearn.over_sampling import SMOTE
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 
 # Step 0: Load and understand the data structure
 # load the datasets without header
@@ -20,22 +26,21 @@ test_data.columns = columns
 train_data['income_class'] = train_data['income_class'].apply(lambda x: 1 if x == " 50000+." else 0)
 test_data['income_class'] = test_data['income_class'].apply(lambda x: 1 if x == " 50000+." else 0)
 
-# display basic information
+# # display basic information
 print("Train data info:")
-# print(train_data.info())
-# print("Test data info:")
-# print(test_data.info())
+print(train_data.info())
+print("Test data info:")
+print(test_data.info())
 
 
 # Step 1: Exploratory Data Analysis
 # check for missing values
 print("Number of missing values in each column:")
-# print(train_data.isnull().sum())
+print(train_data.isnull().sum())
 
 # summary statistics
 print("Summary statictics")
-# print(train_data.describe().to_string())
-# print(train_data.describe())
+print(train_data.describe().to_string())
 
 # check the distribution of the income_class target variable
 sns.countplot(x='income_class', data=train_data)
@@ -43,7 +48,7 @@ plt.title('Income class distribution (binary)')
 plt.xticks(ticks=[0,1], labels=["<=50K",">50K"])
 plt.xlabel('Income Class')
 plt.ylabel('Count')
-# plt.show()
+plt.show()
 
 # Explore relationships between feature and income_class
 # relationship between specific numerical feature and the income_class
@@ -64,13 +69,17 @@ for i, column in enumerate(numerical_features):
     axes[i].set_ylabel(column)
 # Adjust layout
 plt.tight_layout()
-# plt.show()
+plt.show()
 
 # correlation heatmap (numerical features only + income_class)
 correlation_matrix = train_data[numerical_features].corr()
 sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm')
 plt.title('Feature Correlations with income_class')
-# plt.show()
+plt.show()
+exit()
+
+numerical_features = train_data.select_dtypes(include=['int64', 'float64']).columns.drop(['income_class'])
+categorical_features = train_data.select_dtypes(include=['object']).columns
 
 # Step 2: Data Preparation
 # no missing values
@@ -78,11 +87,9 @@ plt.title('Feature Correlations with income_class')
 # train_data.fillna(method='ffill', inplace=True)
 # test_data.fillna(method='ffill', inplace=True)
 
-# encode categorical variables
-categorical_columns = train_data.select_dtypes(include=['object']).columns
+# encode categorical features
 encoder = LabelEncoder()
-
-for col in categorical_columns:
+for col in categorical_features:
     train_data[col] = encoder.fit_transform(train_data[col])
     test_data[col] = encoder.fit_transform(test_data[col])
 
@@ -91,9 +98,104 @@ scaler = StandardScaler()
 train_data[numerical_features] = scaler.fit_transform(train_data[numerical_features])
 test_data[numerical_features] = scaler.fit_transform(test_data[numerical_features])
 
-# Split datasets into predictors (X) and target (y) subsets
+# split datasets into predictors (X) and target (y) subsets
 X_train = train_data.drop('income_class', axis=1)
-y_train = train_data['income_class']
+y_train = train_data['income_class'].astype(int)
 X_test = test_data.drop('income_class', axis=1)
-y_test = test_data['income_class']
+y_test = test_data['income_class'].astype(int)
 
+print("Train data info:")
+print(X_train.info())
+print(X_train.describe())
+print(y_train.info())
+print(y_train.describe())
+
+# Feature importance using Random Forest
+rf = RandomForestClassifier(random_state=42)
+rf.fit(X_train, y_train)
+
+# Plot feature importance
+feature_importances = pd.DataFrame({'Feature': X_train.columns, 'Importance': rf.feature_importances_})
+feature_importances.sort_values(by='Importance', ascending=False, inplace=True)
+
+sns.barplot(x='Importance', y='Feature', data=feature_importances)
+plt.title('Feature Importances')
+plt.show()
+exit()
+
+# # Step 3: Data Modelling and Evaluation
+# function for evaluating models
+def evaluate_model(y_true, y_pred, model_name):
+    print(f"{model_name} - Accuracy: {accuracy_score(y_true, y_pred):.2f}")
+    print(classification_report(y_true, y_pred))
+
+# # Logistic Regression
+lr = LogisticRegression()
+lr.fit(X_train, y_train)
+lr_pred = lr.predict(X_test)
+evaluate_model(y_test, lr_pred, "Logistic Regression")
+
+# # Random Forest
+rf = RandomForestClassifier(random_state=42)
+rf.fit(X_train, y_train)
+rf_pred = rf.predict(X_test)
+evaluate_model(y_test, rf_pred, "Random Forest")
+
+# # XGBoost
+xgb = XGBClassifier(random_state=42, eval_metric='logloss')
+xgb.fit(X_train, y_train)
+xgb_pred = xgb.predict(X_test)
+evaluate_model(y_test, xgb_pred, "XGBoost")
+
+# Step 2a: Adjustments
+# feature engineering: log-transform skewed features
+for col in ['capital_gains', 'capital_losses', 'dividends_from_stocks']:
+    train_data[col] = np.log1p(train_data[col])
+    test_data[col] = np.log1p(test_data[col])
+# 
+# Address class imbalance using SMOTE (there are significantly more examples of people with income below 50k)
+smote = SMOTE(random_state=42)
+X_train_balanced, y_train_balanced = smote.fit_resample(X_train, y_train)
+y_train_balanced = y_train_balanced.astype(int)
+
+# Step 3a: Hyperparameter Tuning with GridSearchCV
+# Define parameter grids
+rf_param_grid = {
+    'n_estimators': [100, 200],
+    'max_depth': [10, 20, None],
+    'min_samples_split': [2, 5]
+}
+
+# Random Forest adjusted
+rf_adj = RandomForestClassifier(random_state=42)
+rf_adj_grid = GridSearchCV(rf_adj, rf_param_grid, cv=3, scoring='f1', n_jobs=-1)
+rf_adj_grid.fit(X_train_balanced, y_train_balanced)
+# Random Forest adjusted Evaluation
+rf_adj_pred = rf_adj_grid.best_estimator_.predict(X_test)
+evaluate_model(y_test, rf_adj_pred, "Random Forest (data adj + balanced trainset + optimized w/ GridSearchCV)")
+
+# XGBoost adjusted
+xgb_adj = XGBClassifier(random_state=42, eval_metric='logloss')
+xgb_adj.fit(X_train_balanced, y_train_balanced)
+# XGBoost adjusted Evaluation
+xgb_adj_pred = xgb_adj.predict(X_test)
+evaluate_model(y_test, xgb_adj_pred, "XGBoost (data adj + balanced trainset)")
+
+# Logistic Regression adjusted
+lr_adj = LogisticRegression(max_iter=1000, class_weight='balanced')
+lr_adj.fit(X_train_balanced, y_train_balanced)
+# Logistic Regression adjusted Evaluation
+lr_adj_pred = lr.predict(X_test)
+evaluate_model(y_test, lr_adj_pred, "Logistic Regression (data adj + balanced trainset + 1000iters + balanced class weight)")
+
+# Step 3b: Deploy Ensemble Model
+# Get probabilities from each adjusted model
+lr_probs = lr_adj.predict_proba(X_test)
+rf_probs = rf_adj_grid.best_estimator_.predict_proba(X_test)
+xgb_probs = xgb_adj.predict_proba(X_test)
+# Average the probabilities (soft voting)
+ensemble_probs = (lr_probs + rf_probs + xgb_probs) / 3
+# Final prediction (class with the highest average probability)
+ensemble_pred = np.argmax(ensemble_probs, axis=1)
+# Evaluate the ensemble
+evaluate_model(y_test, ensemble_pred, "Custom Soft Voting Ensemble")
